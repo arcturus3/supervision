@@ -227,11 +227,14 @@ class InferenceSlicer:
         image_width, image_height = resolution_wh
         overlap_ratio_width, overlap_ratio_height = overlap_ratio_wh
 
-        width_stride = slice_width - int(overlap_ratio_width * slice_width)
-        height_stride = slice_height - int(overlap_ratio_height * slice_height)
+        overlap_width = int(overlap_ratio_width * slice_width)
+        overlap_height = int(overlap_ratio_height * slice_height)
 
-        ws = np.arange(0, image_width, width_stride)
-        hs = np.arange(0, image_height, height_stride)
+        width_stride = slice_width - overlap_width
+        height_stride = slice_height - overlap_height
+
+        ws = np.arange(0, image_width - overlap_width, width_stride)
+        hs = np.arange(0, image_height - overlap_height, height_stride)
 
         xmin, ymin = np.meshgrid(ws, hs)
         xmax = np.clip(xmin + slice_width, 0, image_width)

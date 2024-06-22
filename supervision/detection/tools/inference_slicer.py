@@ -1,6 +1,6 @@
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union, List
 
 import numpy as np
 
@@ -70,7 +70,8 @@ class InferenceSlicer:
 
     def __init__(
         self,
-        callback: Callable[[np.ndarray], Detections],
+        callback: Union[Callable[[np.ndarray], Detections], None] = None,
+        batched_callback: Union[Callable[[List[np.ndarray]], List[Detections]], None] = None,
         slice_wh: Tuple[int, int] = (320, 320),
         overlap_ratio_wh: Tuple[float, float] = (0.2, 0.2),
         overlap_filter_strategy: Union[
@@ -81,11 +82,16 @@ class InferenceSlicer:
     ):
         overlap_filter_strategy = validate_overlap_filter(overlap_filter_strategy)
 
+        if (callback is None and batched_callback is None
+            or callback is not None and batched_callback is not None):
+            raise ValueError('exactly one of `callback` and `batched_callback` must be passed')
+        
         self.slice_wh = slice_wh
         self.overlap_ratio_wh = overlap_ratio_wh
         self.iou_threshold = iou_threshold
         self.overlap_filter_strategy = overlap_filter_strategy
         self.callback = callback
+        self.batched_callback = batched_callback
         self.thread_workers = thread_workers
 
     def __call__(self, image: np.ndarray) -> Detections:
@@ -131,12 +137,15 @@ class InferenceSlicer:
             overlap_ratio_wh=self.overlap_ratio_wh,
         )
 
-        with ThreadPoolExecutor(max_workers=self.thread_workers) as executor:
-            futures = [
-                executor.submit(self._run_callback, image, offset) for offset in offsets
-            ]
-            for future in as_completed(futures):
-                detections_list.append(future.result())
+        if self.callback:
+            with ThreadPoolExecutor(max_workers=self.thread_workers) as executor:
+                futures = [
+                    executor.submit(self._run_callback, image, offset) for offset in offsets
+                ]
+                for future in as_completed(futures):
+                    detections_list.append(future.result())
+        else:
+            detections_list = self.batched_callback(image, offsets)
 
         merged = Detections.merge(detections_list=detections_list)
         if self.overlap_filter_strategy == OverlapFilter.NONE:
@@ -170,6 +179,16 @@ class InferenceSlicer:
         detections = move_detections(
             detections=detections, offset=offset[:2], resolution_wh=resolution_wh
         )
+
+        return detections
+
+    def _run_batched_callback(self, image, offsets) -> List[Detections]:
+        image_slices = [crop_image(image=image, xyxy=offset) for offset in offsets]
+        detections_batch = self.callback(image_slices)
+        resolution_wh = (image.shape[1], image.shape[0])
+        detections = [move_detections(
+            detections=detections, offset=offset[:2], resolution_wh=resolution_wh
+        ) for detections, offset in zip(detections_batch, offsets)]
 
         return detections
 

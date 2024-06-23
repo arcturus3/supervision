@@ -145,7 +145,7 @@ class InferenceSlicer:
                 for future in as_completed(futures):
                     detections_list.append(future.result())
         else:
-            detections_list = self.batched_callback(image, offsets)
+            detections_list = self._run_batched_callback(image, offsets)
 
         merged = Detections.merge(detections_list=detections_list)
         if self.overlap_filter_strategy == OverlapFilter.NONE:
@@ -184,7 +184,7 @@ class InferenceSlicer:
 
     def _run_batched_callback(self, image, offsets) -> List[Detections]:
         image_slices = [crop_image(image=image, xyxy=offset) for offset in offsets]
-        detections_batch = self.callback(image_slices)
+        detections_batch = self.batched_callback(image_slices)
         resolution_wh = (image.shape[1], image.shape[0])
         detections = [move_detections(
             detections=detections, offset=offset[:2], resolution_wh=resolution_wh
